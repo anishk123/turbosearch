@@ -33,3 +33,19 @@ variable "allowed_http_cidr" {
   default = "0.0.0.0/0"
 }
 
+variable "llm_base_url" {
+  type        = string
+  description = "OpenAI-compatible Emberlane endpoint URL, for example https://example.com/v1"
+}
+
+variable "llm_api_key" {
+  type        = string
+  sensitive   = true
+  description = "API key for the Emberlane OpenAI-compatible endpoint."
+}
+
+variable "llm_model" {
+  type        = string
+  default     = "qwen35_9b_awq"
+  description = "Emberlane model profile for cloud summaries."
+}

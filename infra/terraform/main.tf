@@ -143,6 +143,9 @@ resource "aws_instance" "app" {
 
   user_data = templatefile("${path.module}/user_data.sh", {
     database_url = "postgresql://${var.db_username}:${var.db_password}@${aws_rds_cluster.main.endpoint}:5432/${var.db_name}"
+    llm_base_url = var.llm_base_url
+    llm_api_key  = var.llm_api_key
+    llm_model    = var.llm_model
   })
 
   tags = {

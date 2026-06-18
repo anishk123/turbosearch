@@ -2,12 +2,7 @@
 set -euxo pipefail
 
 dnf update -y
-dnf install -y curl git python3.11 python3.11-pip
-
-curl -fsSL https://ollama.com/install.sh | sh
-systemctl enable ollama
-systemctl start ollama
-ollama pull qwen3:0.6b
+dnf install -y git python3.11 python3.11-pip
 
 useradd --system --home-dir /opt/turbosearch --create-home turbosearch || true
 mkdir -p /opt/turbosearch/vector-index
@@ -38,9 +33,9 @@ Environment=INDEX_DIM=256
 Environment=INDEX_VERSION=1
 Environment=VECTOR_INDEX_PATH=/opt/turbosearch/vector-index/vectors.json
 Environment=OVERVIEW_MODE=llm
-Environment=LLM_BASE_URL=http://localhost:11434/v1
-Environment=LLM_API_KEY=ollama
-Environment=LLM_MODEL=qwen3:0.6b
+Environment=LLM_BASE_URL=${llm_base_url}
+Environment=LLM_API_KEY=${llm_api_key}
+Environment=LLM_MODEL=${llm_model}
 ExecStart=/opt/turbosearch/app/.venv/bin/turbosearch serve --host 0.0.0.0 --port 8000
 Restart=always
 

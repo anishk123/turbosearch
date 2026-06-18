@@ -41,16 +41,18 @@ flowchart LR
 | Metadata | PostgreSQL 16 | Aurora PostgreSQL |
 | Vector index | turbovec in-process/host sidecar | turbovec on EC2 |
 | Embeddings | Qwen3-Embedding-0.6B | Qwen3-Embedding-0.6B on EC2 |
-| Summary | OpenAI-compatible endpoint, Ollama default | OpenAI-compatible endpoint or self-hosted model |
+| Summary | host-installed Ollama, OpenAI-compatible API | Emberlane OpenAI-compatible endpoint |
 | Corpus | Project Gutenberg text files | S3/Gutenberg ingestion jobs |
 
 ## Local Run
 
 ```bash
 cp .env.example .env
+ollama pull qwen3:0.6b
 docker compose up --build
-docker compose exec ollama ollama pull qwen3:0.6b
 ```
+
+If Ollama is not already running as a desktop app or service, start it in a separate shell with `ollama serve` before `docker compose up`.
 
 In another shell:
 
@@ -66,7 +68,7 @@ API:
 curl "http://localhost:8000/search?q=a%20whale%20and%20obsession"
 ```
 
-The first embedding run downloads `Qwen/Qwen3-Embedding-0.6B`, so expect a slower cold start.
+The API container reaches your host-installed Ollama through `http://host.docker.internal:11434/v1`. The first embedding run downloads `Qwen/Qwen3-Embedding-0.6B`, so expect a slower cold start.
 
 ## Local Smoke Test
 
@@ -78,10 +80,27 @@ The smoke path initializes Postgres, ingests a few Gutenberg books, builds/upser
 
 ## AWS Deploy
 
+For cloud summaries, deploy Emberlane first and use its OpenAI-compatible endpoint. I would start with the `qwen35_9b_awq` profile: Emberlane maps it to `QuantTrio/Qwen3.5-9B-AWQ` on `g6e.2xlarge`, which is a strong quality step-up for overview generation without carrying the full unquantized memory footprint.
+
+From the Emberlane repo:
+
+```bash
+cargo run -- aws credentials check --profile your-profile
+cargo run -- aws init --profile your-profile
+cargo run -- aws deploy --profile your-profile --model qwen35_9b_awq --mode balanced
+cargo run -- aws print-config --profile your-profile
+```
+
+Then pass the Emberlane endpoint into turbosearch:
+
 ```bash
 cd infra/terraform
 terraform init
-terraform apply
+terraform apply \
+  -var 'db_password=replace-with-a-long-random-password' \
+  -var 'llm_base_url=https://your-emberlane-endpoint/v1' \
+  -var 'llm_api_key=your-emberlane-key' \
+  -var 'llm_model=qwen35_9b_awq'
 ```
 
 Terraform provisions:
@@ -89,7 +108,7 @@ Terraform provisions:
 - VPC, public/private subnets, and security groups
 - Aurora PostgreSQL for metadata and filtering
 - EC2 for API, Qwen embeddings, and turbovec
-- User-data bootstrap for Python dependencies, Ollama, `qwen3:0.6b`, and the API service
+- User-data bootstrap for Python dependencies and the API service
 
 After apply, validate the service URL from Terraform output:
 

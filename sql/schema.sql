@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS documents (
   id BIGSERIAL PRIMARY KEY,
-  source TEXT NOT NULL DEFAULT 'gutenberg',
+  source TEXT NOT NULL DEFAULT 'user',
   source_id TEXT NOT NULL,
   source_url TEXT NOT NULL,
   title TEXT NOT NULL,

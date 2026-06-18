@@ -10,6 +10,7 @@ def test_postgres_schema_is_metadata_only() -> None:
 
     assert "CREATE EXTENSION IF NOT EXISTS vector" not in schema
     assert " embedding vector" not in schema
+    assert "DEFAULT 'gutenberg'" not in schema
     assert "vector_key" in schema
     assert "embedding_model" in schema
     assert "embedding_dim" in schema
@@ -41,6 +42,12 @@ def test_readme_describes_postgres_plus_turbovec_architecture() -> None:
     assert "![Tests]" in readme
     assert "host-installed Ollama" in readme
     assert "qwen35_9b_awq" in readme
+    assert "flowchart TB" in readme
+    assert "better Project Gutenberg" not in readme
+    assert "Gutenberg-scale" not in readme
+    assert "Project Gutenberg search" not in readme
+    assert "Gutenberg" in readme
+    assert "example" in readme.lower()
 
 
 def test_aws_runtime_uses_emberlane_not_local_ollama() -> None:

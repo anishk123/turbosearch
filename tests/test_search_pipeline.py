@@ -14,7 +14,7 @@ class FakeMetadataStore:
                 "title": "Moby-Dick",
                 "author": "Herman Melville",
                 "body": f"passage {key}",
-                "source_url": "https://www.gutenberg.org/ebooks/2701",
+                "source_url": "memory://examples/moby-dick",
             }
             for key in vector_keys
         ]
@@ -54,4 +54,3 @@ def test_pipeline_filters_in_postgres_then_searches_turbovec_allowlist() -> None
     assert result["overview"] == "Moby-Dick passages connect obsession to the whale."
     assert [row["vector_key"] for row in result["results"]] == [102, 101]
     assert result["results"][0]["score"] == 0.99
-

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "turbosearch"
 version = "0.1.0"
-description = "Hybrid PostgreSQL/vector search with AI-style overviews for a Gutenberg-like corpus."
+description = "Hybrid PostgreSQL/vector search with AI-style overviews for document collections."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -36,6 +36,7 @@ Environment=OVERVIEW_MODE=llm
 Environment=LLM_BASE_URL=${llm_base_url}
 Environment=LLM_API_KEY=${llm_api_key}
 Environment=LLM_MODEL=${llm_model}
+Environment=DOCUMENT_BUCKET=${document_bucket}
 ExecStart=/opt/turbosearch/app/.venv/bin/turbosearch serve --host 0.0.0.0 --port 8000
 Restart=always
 

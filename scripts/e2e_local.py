@@ -1,18 +1,18 @@
 from turbosearch.db import init_db
-from turbosearch.ingest import ingest_example_documents
+from turbosearch.ingest import ingest_directory
 from turbosearch.search import search
 
 
 def main() -> None:
     init_db()
-    counts = ingest_example_documents()
-    print("Ingested example chunks:")
+    counts = ingest_directory("examples/local-docs")
+    print("Ingested local directory: examples/local-docs")
     for title, count in counts.items():
         print(f"- {title}: {count}")
 
     expected = {
-        "semantic retrieval metadata filters": "Semantic Retrieval Notes",
-        "cloud deployment with an OpenAI-compatible model": "Cloud Deployment Notes",
+        "semantic retrieval metadata filters": "search-notes.md",
+        "cloud deployment with an OpenAI-compatible model": "cloud-notes.md",
     }
     for query, expected_title in expected.items():
         result = search(query, limit=3)

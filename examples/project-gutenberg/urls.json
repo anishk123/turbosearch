@@ -1,0 +1,20 @@
+[
+  {
+    "source_id": "1342",
+    "title": "Pride and Prejudice",
+    "author": "Jane Austen",
+    "url": "https://www.gutenberg.org/cache/epub/1342/pg1342.txt"
+  },
+  {
+    "source_id": "84",
+    "title": "Frankenstein; Or, The Modern Prometheus",
+    "author": "Mary Wollstonecraft Shelley",
+    "url": "https://www.gutenberg.org/cache/epub/84/pg84.txt"
+  },
+  {
+    "source_id": "2701",
+    "title": "Moby-Dick; Or, The Whale",
+    "author": "Herman Melville",
+    "url": "https://www.gutenberg.org/cache/epub/2701/pg2701.txt"
+  }
+]

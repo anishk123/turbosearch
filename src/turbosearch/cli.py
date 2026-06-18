@@ -5,8 +5,7 @@ import uvicorn
 
 from turbosearch.db import init_db
 from turbosearch.ingest import (
-    ingest_default_gutenberg,
-    ingest_example_documents,
+    ingest_directory,
     ingest_url as ingest_one_url,
 )
 from turbosearch.search import search as run_search
@@ -20,15 +19,9 @@ def init_db_command() -> None:
     typer.echo("Database initialized.")
 
 
-@app.command("ingest-gutenberg")
-def ingest_gutenberg_command() -> None:
-    counts = ingest_default_gutenberg()
-    typer.echo(json.dumps(counts, indent=2))
-
-
-@app.command("ingest-example")
-def ingest_example_command() -> None:
-    counts = ingest_example_documents()
+@app.command("ingest-dir")
+def ingest_dir_command(path: str) -> None:
+    counts = ingest_directory(path)
     typer.echo(json.dumps(counts, indent=2))
 
 

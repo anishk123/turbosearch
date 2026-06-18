@@ -6,3 +6,6 @@ output "aurora_endpoint" {
   value = aws_rds_cluster.main.endpoint
 }
 
+output "document_bucket_name" {
+  value = aws_s3_bucket.documents.bucket
+}

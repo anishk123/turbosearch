@@ -1,15 +1,17 @@
 import sys
 from types import SimpleNamespace
 
-from turbosearch.search import InProcessVectorIndex, TurbovecVectorIndex
+import pytest
+
+from turbosearch.search import SimpleVectorIndex, TurbovecVectorIndex
 
 
-def test_fallback_vector_index_persists_across_instances(tmp_path) -> None:
+def test_simple_vector_index_persists_across_instances(tmp_path) -> None:
     index_path = tmp_path / "vectors.json"
-    first = InProcessVectorIndex(index_path=index_path)
+    first = SimpleVectorIndex(index_path=index_path)
     first.upsert(10, [1.0, 0.0])
 
-    second = InProcessVectorIndex(index_path=index_path)
+    second = SimpleVectorIndex(index_path=index_path)
 
     assert second.search([1.0, 0.0], allowlist=[10], limit=1) == [
         {"vector_key": 10, "score": 1.0}
@@ -39,3 +41,9 @@ def test_turbovec_adapter_rehydrates_vectors_for_new_process(tmp_path, monkeypat
         {"vector_key": 42, "score": 1.0}
     ]
 
+
+def test_turbovec_adapter_reports_missing_package(tmp_path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "turbovec", None)
+
+    with pytest.raises(RuntimeError, match="turbovec is required"):
+        TurbovecVectorIndex(dim=2, index_path=tmp_path / "vectors.json")

@@ -9,7 +9,9 @@
 
 Fast semantic search and cited AI overviews for your own document collections, built on a Postgres + turbovec architecture.
 
-`turbosearch` is a local-first retrieval stack for private corpora, research libraries, knowledge bases, archives, and public-domain examples. It combines Postgres metadata filtering, turbovec vector retrieval, Qwen embeddings, and an OpenAI-compatible LLM summary layer so users can find passages faster and understand why the results matter.
+`turbosearch` is a local-first retrieval stack for private corpora, research libraries, knowledge bases, archives, and public-domain examples. It combines Postgres metadata filtering, [turbovec](https://github.com/RyanCodrai/turbovec) vector retrieval, Qwen embeddings, and an OpenAI-compatible LLM summary layer so users can find passages faster and understand why the results matter.
+
+`turbovec` is a Rust/Python vector index built on Google Research's [TurboQuant](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/) work, which focuses on compact online vector quantization with near-optimal distortion.
 
 ![Turbosearch Docker demo](assets/turbosearch-demo.gif)
 
@@ -48,7 +50,7 @@ flowchart TB
 
 - Search your own documents by meaning, not just exact keywords.
 - Keep Postgres as the durable source of truth for documents, chunks, metadata, filters, and lexical search.
-- Use turbovec as the fast local ANN layer, with Postgres-provided allowlists for filtered search.
+- Use [turbovec](https://github.com/RyanCodrai/turbovec) as the fast local ANN layer, with Postgres-provided allowlists for filtered search.
 - Use `Qwen/Qwen3-Embedding-0.6B` for local, high-quality embeddings with MRL truncation for speed and memory control.
 - Generate LLM summaries immediately, with citations back to exact passages and source URLs.
 - Prove everything locally before deploying Aurora PostgreSQL + EC2 on AWS.
@@ -78,7 +80,7 @@ In another shell:
 
 ```bash
 docker compose exec api turbosearch init-db
-docker compose exec api turbosearch ingest-example
+docker compose exec api turbosearch ingest-dir ./examples/local-docs
 docker compose exec api turbosearch search "Which document mentions semantic retrieval?"
 ```
 
@@ -102,13 +104,27 @@ Or run the same flow through `make`:
 make e2e-local
 ```
 
-The smoke path initializes Postgres, ingests a tiny built-in example corpus, builds/upserts local vector entries, runs search queries, and asks the configured LLM endpoint for summaries.
+The smoke path initializes Postgres, ingests `examples/local-docs`, builds/upserts local vector entries, runs search queries, and asks the configured LLM endpoint for summaries.
 
 `make e2e-local` uses the deterministic local embedder so the full Docker smoke test stays quick and reproducible. It still calls your host-installed Ollama for the LLM overview. Set `EMBEDDING_PROVIDER=qwen` when you want the higher-quality Qwen embedding path.
 
 ## Example Data
 
-The built-in example corpus is intentionally tiny and generic so the full stack can be tested quickly. Project Gutenberg URLs are still useful as optional public-domain examples, but Turbosearch is not tied to Gutenberg. Use `turbosearch ingest-url` for any reachable plain-text document URL.
+The example files under `examples/local-docs` are intentionally tiny and generic so the full stack can be tested quickly. You can index your own local files with `turbosearch ingest-dir ./path/to/docs`; `.txt`, `.md`, and `.markdown` files are read recursively.
+
+You can also ingest through the API:
+
+```bash
+curl -X POST "http://localhost:8000/ingest/text" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"My Note","text":"Turbosearch can index text sent directly to the API."}'
+
+curl -X POST "http://localhost:8000/ingest/url" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Example Remote Text","url":"https://example.com/document.txt"}'
+```
+
+For public-domain demos, `examples/project-gutenberg/urls.json` contains example documents from Project Gutenberg. Turbosearch is not tied to Gutenberg; those URLs are just sample inputs for the URL ingestion API.
 
 ## AWS Deploy
 
@@ -140,6 +156,7 @@ Terraform provisions:
 - VPC, public/private subnets, and security groups
 - Aurora PostgreSQL for metadata and filtering
 - EC2 for API, Qwen embeddings, and turbovec
+- S3 document bucket for uploaded `.txt` and `.md` files
 - User-data bootstrap for Python dependencies and the API service
 
 After apply, validate the service URL from Terraform output:
@@ -147,6 +164,16 @@ After apply, validate the service URL from Terraform output:
 ```bash
 terraform output app_url
 curl "$(terraform output -raw app_url)/health"
+```
+
+Upload documents and trigger S3 ingestion:
+
+```bash
+aws s3 cp ./docs "s3://$(terraform output -raw document_bucket_name)/docs/" --recursive
+curl -X POST "$(terraform output -raw app_url)/ingest/s3" \
+  -H "Content-Type: application/json" \
+  -d '{"prefix":"docs/"}'
+curl "$(terraform output -raw app_url)/search?q=your%20query"
 ```
 
 The EC2 user-data script installs the service and runtime dependencies. Add SSM Session Manager or an SSH key pair before running manual commands on the instance.

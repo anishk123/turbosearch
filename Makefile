@@ -3,7 +3,7 @@
 e2e-local:
 	@curl -fsS http://localhost:11434/v1/models >/dev/null || \
 		(echo "Ollama must be running on localhost:11434. Run: ollama serve" && exit 1)
-	EMBEDDING_PROVIDER=hash docker compose up --build -d
+	EMBEDDING_PROVIDER=hash VECTOR_BACKEND=simple docker compose up --build -d
 	@ready=0; \
 	for i in $$(seq 1 60); do \
 		if docker compose exec api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" >/dev/null 2>&1; then \

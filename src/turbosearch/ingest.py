@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -7,60 +8,7 @@ from turbosearch.config import settings
 from turbosearch.db import connect
 from turbosearch.search import build_embedder, get_vector_index
 
-
-@dataclass(frozen=True)
-class ExampleDocument:
-    source_id: str
-    title: str
-    author: str
-    url: str
-
-
-DEFAULT_BOOKS = [
-    ExampleDocument(
-        source_id="1342",
-        title="Pride and Prejudice",
-        author="Jane Austen",
-        url="https://www.gutenberg.org/cache/epub/1342/pg1342.txt",
-    ),
-    ExampleDocument(
-        source_id="84",
-        title="Frankenstein; Or, The Modern Prometheus",
-        author="Mary Wollstonecraft Shelley",
-        url="https://www.gutenberg.org/cache/epub/84/pg84.txt",
-    ),
-    ExampleDocument(
-        source_id="2701",
-        title="Moby-Dick; Or, The Whale",
-        author="Herman Melville",
-        url="https://www.gutenberg.org/cache/epub/2701/pg2701.txt",
-    ),
-]
-
-LOCAL_EXAMPLE_DOCUMENTS = [
-    {
-        "source_id": "example-semantic-retrieval",
-        "title": "Semantic Retrieval Notes",
-        "author": "Turbosearch",
-        "source_url": "memory://examples/semantic-retrieval",
-        "body": (
-            "Semantic retrieval helps users find relevant passages even when "
-            "their query uses different words. Postgres stores metadata and "
-            "filters while turbovec searches compact document embeddings."
-        ),
-    },
-    {
-        "source_id": "example-cloud-deploy",
-        "title": "Cloud Deployment Notes",
-        "author": "Turbosearch",
-        "source_url": "memory://examples/cloud-deploy",
-        "body": (
-            "A cloud deployment can use Aurora PostgreSQL for durable metadata, "
-            "EC2 for the API and vector index, and Emberlane for an "
-            "OpenAI-compatible summary model."
-        ),
-    },
-]
+SUPPORTED_TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 
 
 def embedding_metadata(embedder) -> tuple[str, int]:
@@ -204,28 +152,53 @@ def ingest_text(
     return len(chunks)
 
 
-def ingest_example_documents() -> dict[str, int]:
+def iter_directory_documents(path: str | Path):
+    root = Path(path).expanduser().resolve()
+    for file_path in sorted(root.rglob("*")):
+        if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_TEXT_SUFFIXES:
+            continue
+        yield {
+            "source": "directory",
+            "source_id": str(file_path.relative_to(root)),
+            "title": file_path.name,
+            "author": None,
+            "source_url": file_path.as_uri(),
+            "text": file_path.read_text(encoding="utf-8"),
+        }
+
+
+def ingest_directory(path: str | Path) -> dict[str, int]:
     counts = {}
-    for document in LOCAL_EXAMPLE_DOCUMENTS:
-        counts[document["title"]] = ingest_text(
-            source="example",
-            source_id=document["source_id"],
-            title=document["title"],
-            author=document["author"],
-            source_url=document["source_url"],
-            text=document["body"],
-        )
+    for document in iter_directory_documents(path):
+        counts[document["title"]] = ingest_text(**document)
     return counts
 
 
-def ingest_default_gutenberg() -> dict[str, int]:
+def iter_s3_documents(bucket: str, prefix: str = "", *, client: Any | None = None):
+    if client is None:
+        import boto3
+
+        client = boto3.client("s3")
+
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []):
+            key = item["Key"]
+            if key.endswith("/") or Path(key).suffix.lower() not in SUPPORTED_TEXT_SUFFIXES:
+                continue
+            body = client.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
+            yield {
+                "source": "s3",
+                "source_id": key,
+                "title": Path(key).name,
+                "author": None,
+                "source_url": f"s3://{bucket}/{key}",
+                "text": body,
+            }
+
+
+def ingest_s3_bucket(bucket: str, prefix: str = "", *, client: Any | None = None) -> dict[str, int]:
     counts = {}
-    for book in DEFAULT_BOOKS:
-        counts[book.title] = ingest_url(
-            book.source_id,
-            book.title,
-            book.author,
-            book.url,
-            source="gutenberg",
-        )
+    for document in iter_s3_documents(bucket, prefix, client=client):
+        counts[document["title"]] = ingest_text(**document)
     return counts

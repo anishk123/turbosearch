@@ -9,10 +9,12 @@ class Settings(BaseSettings):
     index_dim: int = 256
     index_version: int = 1
     vector_index_path: str = ".turbosearch/vectors.json"
+    vector_backend: str = "turbovec"
     overview_mode: str = "llm"
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: str = "ollama"
     llm_model: str = "qwen3:0.6b"
+    document_bucket: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

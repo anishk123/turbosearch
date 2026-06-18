@@ -130,8 +130,8 @@ class PersistedVectorStore:
         return self._vectors.get(int(vector_key))
 
 
-class InProcessVectorIndex:
-    """Cosine-search fallback used when turbovec is not installed."""
+class SimpleVectorIndex:
+    """Deterministic local vector index for tests and smoke demos."""
 
     def __init__(self, index_path: str | Path | None = None) -> None:
         self._store = PersistedVectorStore(index_path)
@@ -172,7 +172,10 @@ class TurbovecVectorIndex:
         try:
             import turbovec
         except ImportError as exc:
-            raise RuntimeError("turbovec package is not installed") from exc
+            raise RuntimeError(
+                "turbovec is required for VECTOR_BACKEND=turbovec. "
+                "Install turbosearch[vector] or set VECTOR_BACKEND=simple for tests/smoke demos."
+            ) from exc
 
         self._store = PersistedVectorStore(index_path)
         self._index = turbovec.Index(dim=dim)
@@ -219,10 +222,14 @@ def get_vector_index() -> VectorIndex:
     global _VECTOR_INDEX
     if _VECTOR_INDEX is not None:
         return _VECTOR_INDEX
-    try:
+    if settings.vector_backend.lower() == "simple":
+        _VECTOR_INDEX = SimpleVectorIndex(settings.vector_index_path)
+    elif settings.vector_backend.lower() == "turbovec":
         _VECTOR_INDEX = TurbovecVectorIndex(settings.index_dim, settings.vector_index_path)
-    except RuntimeError:
-        _VECTOR_INDEX = InProcessVectorIndex(settings.vector_index_path)
+    else:
+        raise RuntimeError(
+            f"Unsupported VECTOR_BACKEND={settings.vector_backend!r}; expected 'turbovec' or 'simple'."
+        )
     return _VECTOR_INDEX
 
 

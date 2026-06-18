@@ -104,6 +104,57 @@ resource "aws_security_group" "db" {
   }
 }
 
+resource "aws_s3_bucket" "documents" {
+  bucket_prefix = "${var.project}-documents-"
+}
+
+resource "aws_iam_role" "app" {
+  name = "${var.project}-app"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "document_bucket_read" {
+  name = "${var.project}-document-bucket-read"
+  role = aws_iam_role.app.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = aws_s3_bucket.documents.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = "${aws_s3_bucket.documents.arn}/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "app" {
+  name = "${var.project}-app"
+  role = aws_iam_role.app.name
+}
+
 resource "aws_rds_cluster" "main" {
   cluster_identifier      = var.project
   engine                  = "aurora-postgresql"
@@ -140,12 +191,14 @@ resource "aws_instance" "app" {
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.public[0].id
   vpc_security_group_ids = [aws_security_group.app.id]
+  iam_instance_profile   = aws_iam_instance_profile.app.name
 
   user_data = templatefile("${path.module}/user_data.sh", {
     database_url = "postgresql://${var.db_username}:${var.db_password}@${aws_rds_cluster.main.endpoint}:5432/${var.db_name}"
     llm_base_url = var.llm_base_url
     llm_api_key  = var.llm_api_key
     llm_model    = var.llm_model
+    document_bucket = aws_s3_bucket.documents.bucket
   })
 
   tags = {

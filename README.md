@@ -11,6 +11,8 @@ Fast semantic search and cited AI overviews for your own document collections, b
 
 `turbosearch` is a local-first retrieval stack for private corpora, research libraries, knowledge bases, archives, and public-domain examples. It combines Postgres metadata filtering, turbovec vector retrieval, Qwen embeddings, and an OpenAI-compatible LLM summary layer so users can find passages faster and understand why the results matter.
 
+![Turbosearch Docker demo](assets/turbosearch-demo.gif)
+
 ```mermaid
 flowchart TB
   User["User query<br/>natural language + filters"]
@@ -101,6 +103,8 @@ make e2e-local
 ```
 
 The smoke path initializes Postgres, ingests a tiny built-in example corpus, builds/upserts local vector entries, runs search queries, and asks the configured LLM endpoint for summaries.
+
+`make e2e-local` uses the deterministic local embedder so the full Docker smoke test stays quick and reproducible. It still calls your host-installed Ollama for the LLM overview. Set `EMBEDDING_PROVIDER=qwen` when you want the higher-quality Qwen embedding path.
 
 ## Example Data
 

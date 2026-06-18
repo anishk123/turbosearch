@@ -63,6 +63,13 @@ LOCAL_EXAMPLE_DOCUMENTS = [
 ]
 
 
+def embedding_metadata(embedder) -> tuple[str, int]:
+    return (
+        getattr(embedder, "model_name", settings.embedding_model),
+        int(getattr(embedder, "index_dim", settings.index_dim)),
+    )
+
+
 def ingest_url(
     source_id: str,
     title: str,
@@ -76,6 +83,7 @@ def ingest_url(
     text = strip_gutenberg_boilerplate(response.text)
     chunks = chunk_text(text)
     embedder = build_embedder()
+    embedding_model, embedding_dim = embedding_metadata(embedder)
     vector_index = get_vector_index()
 
     with connect() as conn:
@@ -120,8 +128,8 @@ def ingest_url(
                     index,
                     chunk,
                     len(chunk.split()),
-                    settings.embedding_model,
-                    settings.index_dim,
+                    embedding_model,
+                    embedding_dim,
                     settings.index_version,
                 ),
             ).fetchone()
@@ -141,6 +149,7 @@ def ingest_text(
 ) -> int:
     chunks = chunk_text(text)
     embedder = build_embedder()
+    embedding_model, embedding_dim = embedding_metadata(embedder)
     vector_index = get_vector_index()
 
     with connect() as conn:
@@ -185,8 +194,8 @@ def ingest_text(
                     index,
                     chunk,
                     len(chunk.split()),
-                    settings.embedding_model,
-                    settings.index_dim,
+                    embedding_model,
+                    embedding_dim,
                     settings.index_version,
                 ),
             ).fetchone()

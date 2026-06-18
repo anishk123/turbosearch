@@ -18,7 +18,13 @@ services:
   api:
     image: python:3.11-slim
     working_dir: /app
-    command: sh -c "pip install -e '.[embeddings]' && uvicorn turbosearch.api:app --host 0.0.0.0 --port 8000"
+    command: >
+      sh -c "if [ \"$${EMBEDDING_PROVIDER}\" = qwen ]; then
+        pip install -e '.[embeddings]';
+      else
+        pip install -e .;
+      fi &&
+      uvicorn turbosearch.api:app --host 0.0.0.0 --port 8000"
     environment:
       DATABASE_URL: postgresql://turbosearch:turbosearch@postgres:5432/turbosearch
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-qwen}
@@ -39,6 +45,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

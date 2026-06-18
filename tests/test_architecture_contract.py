@@ -42,6 +42,8 @@ def test_readme_describes_postgres_plus_turbovec_architecture() -> None:
     assert "![Tests]" in readme
     assert "host-installed Ollama" in readme
     assert "qwen35_9b_awq" in readme
+    assert "assets/turbosearch-demo.gif" in readme
+    assert (ROOT / "assets" / "turbosearch-demo.gif").exists()
     assert "flowchart TB" in readme
     assert "better Project Gutenberg" not in readme
     assert "Gutenberg-scale" not in readme

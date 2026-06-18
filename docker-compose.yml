@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16
     environment:
       POSTGRES_USER: turbosearch
       POSTGRES_PASSWORD: turbosearch
@@ -15,6 +15,41 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+  api:
+    image: python:3.11-slim
+    working_dir: /app
+    command: sh -c "pip install -e '.[embeddings]' && uvicorn turbosearch.api:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql://turbosearch:turbosearch@postgres:5432/turbosearch
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-qwen}
+      EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
+      EMBEDDING_DIM: 1024
+      INDEX_DIM: 256
+      INDEX_VERSION: 1
+      VECTOR_INDEX_PATH: /app/.turbosearch/vectors.json
+      OVERVIEW_MODE: ${OVERVIEW_MODE:-llm}
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_API_KEY: ollama
+      LLM_MODEL: ${LLM_MODEL:-qwen3:0.6b}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - vector-index:/app/.turbosearch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
 volumes:
   postgres-data:
-
+  ollama-data:
+  vector-index:

@@ -4,9 +4,9 @@ __pycache__/
 .env
 .pytest_cache/
 .ruff_cache/
+.turbosearch/
 dist/
 build/
 *.egg-info/
 .terraform/
 terraform.tfstate*
-

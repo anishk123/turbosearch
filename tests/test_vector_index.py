@@ -1,0 +1,41 @@
+import sys
+from types import SimpleNamespace
+
+from turbosearch.search import InProcessVectorIndex, TurbovecVectorIndex
+
+
+def test_fallback_vector_index_persists_across_instances(tmp_path) -> None:
+    index_path = tmp_path / "vectors.json"
+    first = InProcessVectorIndex(index_path=index_path)
+    first.upsert(10, [1.0, 0.0])
+
+    second = InProcessVectorIndex(index_path=index_path)
+
+    assert second.search([1.0, 0.0], allowlist=[10], limit=1) == [
+        {"vector_key": 10, "score": 1.0}
+    ]
+
+
+def test_turbovec_adapter_rehydrates_vectors_for_new_process(tmp_path, monkeypatch) -> None:
+    class FakeIndex:
+        def __init__(self, dim: int) -> None:
+            self.vectors = {}
+
+        def upsert(self, key: int, embedding: list[float]) -> None:
+            self.vectors[key] = embedding
+
+        def search(self, query_embedding: list[float], allowlist: list[int], limit: int):
+            return [(key, 1.0) for key in allowlist if key in self.vectors][:limit]
+
+    monkeypatch.setitem(sys.modules, "turbovec", SimpleNamespace(Index=FakeIndex))
+    index_path = tmp_path / "turbovec-vectors.json"
+
+    first = TurbovecVectorIndex(dim=2, index_path=index_path)
+    first.upsert(42, [1.0, 0.0])
+
+    second = TurbovecVectorIndex(dim=2, index_path=index_path)
+
+    assert second.search([1.0, 0.0], allowlist=[42], limit=1) == [
+        {"vector_key": 42, "score": 1.0}
+    ]
+

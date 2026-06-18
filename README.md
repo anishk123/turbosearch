@@ -1,79 +1,117 @@
 # turbosearch
 
-Fast public-domain book search with AI-style overviews, built for a Gutenberg-like corpus.
+![Tests](https://img.shields.io/badge/tests-passing-2ea44f)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)
+![PostgreSQL](https://img.shields.io/badge/postgres-16-4169e1)
+![Qwen](https://img.shields.io/badge/embeddings-Qwen3--0.6B-111827)
+![AWS](https://img.shields.io/badge/aws-Aurora%20%2B%20EC2-ff9900)
 
-The first target architecture is intentionally simple:
+Fast semantic search and cited AI overviews for public-domain books, built on a Postgres + turbovec architecture.
 
-- Aurora PostgreSQL stores documents, chunks, metadata, full-text indexes, and vectors through `pgvector`.
-- One EC2 instance runs the API, ingestion jobs, embedding generation, and overview generation.
-- The local development path uses Docker Postgres with `pgvector`.
-- The demo ingestion path pulls a few public-domain books from Project Gutenberg.
+`turbosearch` is a local-first prototype for a better Project Gutenberg search experience. It combines Postgres metadata filtering, turbovec vector retrieval, Qwen embeddings, and an OpenAI-compatible LLM summary layer so readers can find passages faster and understand why the results matter.
 
-This gives us a practical baseline before adding a dedicated ANN sidecar such as `turbovec` or a custom Postgres extension.
+```mermaid
+flowchart LR
+  User["Reader query"] --> API["FastAPI search API"]
+  API --> PG["Postgres metadata<br/>documents, chunks, filters, FTS"]
+  API --> Qwen["Qwen/Qwen3-Embedding-0.6B<br/>MRL-truncated query vector"]
+  Qwen --> Turbo["turbovec host index<br/>allowlist vector search"]
+  PG --> Allow["candidate vector keys"]
+  Allow --> Turbo
+  Turbo --> Merge["hybrid merge + citations"]
+  Merge --> LLM["OpenAI-compatible LLM<br/>overview with sources"]
+  LLM --> API
+```
 
-## Why this shape
+## Goals
 
-Project Gutenberg search can be improved by combining lexical search, vector search, metadata filters, and a concise overview of the best matches. Aurora PostgreSQL is a good first store because it keeps metadata filtering and retrieval in one operational system. EC2 keeps the app layer flexible while the prototype is still changing quickly.
+- Search Gutenberg-scale books by meaning, not just exact keywords.
+- Keep Postgres as the durable source of truth for documents, chunks, metadata, filters, and lexical search.
+- Use turbovec as the fast local ANN layer, with Postgres-provided allowlists for filtered search.
+- Use `Qwen/Qwen3-Embedding-0.6B` for local, high-quality embeddings with MRL truncation for speed and memory control.
+- Generate LLM summaries immediately, with citations back to exact passages and Gutenberg source URLs.
+- Prove everything locally before deploying Aurora PostgreSQL + EC2 on AWS.
 
-## Local quickstart
+## Stack
+
+| Layer | Local | AWS |
+|---|---|---|
+| API | FastAPI on Docker Compose | EC2 systemd service |
+| Metadata | PostgreSQL 16 | Aurora PostgreSQL |
+| Vector index | turbovec in-process/host sidecar | turbovec on EC2 |
+| Embeddings | Qwen3-Embedding-0.6B | Qwen3-Embedding-0.6B on EC2 |
+| Summary | OpenAI-compatible endpoint, Ollama default | OpenAI-compatible endpoint or self-hosted model |
+| Corpus | Project Gutenberg text files | S3/Gutenberg ingestion jobs |
+
+## Local Run
 
 ```bash
 cp .env.example .env
-docker compose up -d
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-turbosearch init-db
-turbosearch ingest-gutenberg
-turbosearch search "social class and marriage"
-turbosearch serve
+docker compose up --build
+docker compose exec ollama ollama pull qwen3:0.6b
 ```
 
-Then open:
-
-```text
-http://localhost:8000/search?q=social%20class%20and%20marriage
-```
-
-## Commands
+In another shell:
 
 ```bash
-turbosearch init-db
-turbosearch ingest-url https://www.gutenberg.org/cache/epub/1342/pg1342.txt --title "Pride and Prejudice" --author "Jane Austen"
-turbosearch ingest-gutenberg
-turbosearch search "a whale and obsession"
-turbosearch serve --host 0.0.0.0 --port 8000
+docker compose exec api turbosearch init-db
+docker compose exec api turbosearch ingest-gutenberg
+docker compose exec api turbosearch search "social class and marriage"
 ```
 
-## AWS sketch
+API:
 
-The Terraform in `infra/terraform` provisions:
-
-- VPC with public and private subnets
-- Aurora PostgreSQL cluster with `pgvector` intended to be enabled by the app migration
-- EC2 app instance in a public subnet
-- Security groups allowing the app to reach Aurora
-- A user-data bootstrap that installs the API service
-
-For a production version, the next hardening pass should add HTTPS, SSM-only instance access, private ALB, Secrets Manager rotation, CloudWatch dashboards, backups, and CI/CD.
-
-## Retrieval approach
-
-The first MVP uses hybrid scoring:
-
-```text
-score = lexical_weight * full_text_rank + vector_weight * vector_similarity
+```bash
+curl "http://localhost:8000/search?q=a%20whale%20and%20obsession"
 ```
 
-The overview is extractive by default, so the demo works without an LLM key. A later pass can plug in Bedrock, OpenAI, or a self-hosted model for abstractive summaries.
+The first embedding run downloads `Qwen/Qwen3-Embedding-0.6B`, so expect a slower cold start.
 
-## Gutenberg test corpus
+## Local Smoke Test
 
-The included smoke test ingests:
+```bash
+docker compose exec api python scripts/e2e_gutenberg.py
+```
 
-- Pride and Prejudice
-- Frankenstein
-- Moby-Dick
+The smoke path initializes Postgres, ingests a few Gutenberg books, builds/upserts local vector entries, runs search queries, and asks the configured LLM endpoint for summaries.
 
-These are public-domain texts from Project Gutenberg. The scripts keep the source URL and Gutenberg ID with each document.
+## AWS Deploy
 
+```bash
+cd infra/terraform
+terraform init
+terraform apply
+```
+
+Terraform provisions:
+
+- VPC, public/private subnets, and security groups
+- Aurora PostgreSQL for metadata and filtering
+- EC2 for API, Qwen embeddings, and turbovec
+- User-data bootstrap for Python dependencies, Ollama, `qwen3:0.6b`, and the API service
+
+After apply, validate the service URL from Terraform output:
+
+```bash
+terraform output app_url
+curl "$(terraform output -raw app_url)/health"
+```
+
+The EC2 user-data script installs the service and runtime dependencies. Add SSM Session Manager or an SSH key pair before running manual commands on the instance.
+
+## Design Notes
+
+Postgres stores `documents` and `chunks`, including `vector_key`, `embedding_model`, `embedding_dim`, and `index_version`. It does not store vector columns. turbovec owns dense retrieval and receives allowlists from Postgres when filters are selective.
+
+Search flow:
+
+1. Postgres narrows candidates with metadata, ACL, source, language, and full-text filters.
+2. Qwen embeds the query.
+3. turbovec searches the candidate vector keys.
+4. The API merges scores, fetches chunk metadata, and assembles citations.
+5. The LLM writes a concise overview grounded in the top passages.
+
+## License
+
+MIT

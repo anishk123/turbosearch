@@ -1,49 +1,298 @@
-from typing import Any
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any, Protocol
+
+import numpy as np
 
 from turbosearch.config import settings
 from turbosearch.db import connect
-from turbosearch.embeddings import HashEmbeddingProvider, vector_literal
-from turbosearch.overview import build_overview
+from turbosearch.embeddings import HashEmbeddingProvider, QwenEmbeddingProvider
+from turbosearch.overview import ExtractiveSummarizer, OpenAICompatibleSummarizer
+
+
+class MetadataStore(Protocol):
+    def candidate_vector_keys(self, query: str, limit: int | None) -> list[int]: ...
+
+    def chunks_by_vector_keys(self, vector_keys: list[int]) -> list[dict[str, Any]]: ...
+
+
+class VectorIndex(Protocol):
+    def search(
+        self,
+        query_embedding: list[float],
+        allowlist: list[int],
+        limit: int,
+    ) -> list[dict[str, Any]]: ...
+
+
+class Embedder(Protocol):
+    def embed_query(self, text: str) -> list[float]: ...
+
+
+class Summarizer(Protocol):
+    def summarize(self, query: str, rows: list[dict[str, Any]]) -> str: ...
+
+
+class PostgresMetadataStore:
+    """Postgres-backed metadata candidate retrieval."""
+
+    def candidate_vector_keys(self, query: str, limit: int | None) -> list[int]:
+        del query
+        limit_clause = "LIMIT %s" if limit is not None else ""
+        params = (limit,) if limit is not None else ()
+        with connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.vector_key
+                FROM chunks c
+                ORDER BY c.id ASC
+                {limit_clause}
+                """,
+                params,
+            ).fetchall()
+
+            return [int(row["vector_key"]) for row in rows]
+
+    def chunks_by_vector_keys(self, vector_keys: list[int]) -> list[dict[str, Any]]:
+        if not vector_keys:
+            return []
+
+        with connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  c.id AS chunk_id,
+                  c.vector_key,
+                  d.id AS document_id,
+                  d.title,
+                  d.author,
+                  d.source_url,
+                  c.chunk_index,
+                  c.heading,
+                  c.body,
+                  c.token_count,
+                  c.embedding_model,
+                  c.embedding_dim,
+                  c.index_version
+                FROM chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE c.vector_key = ANY(%s)
+                """,
+                (vector_keys,),
+            ).fetchall()
+
+        rows_by_key = {int(row["vector_key"]): dict(row) for row in rows}
+        return [rows_by_key[key] for key in vector_keys if key in rows_by_key]
+
+
+class PersistedVectorStore:
+    def __init__(self, index_path: str | Path | None = None) -> None:
+        self.index_path = Path(index_path or settings.vector_index_path)
+        self._vectors: dict[int, np.ndarray] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.index_path.exists():
+            return
+        data = json.loads(self.index_path.read_text())
+        self._vectors = {
+            int(key): np.asarray(value, dtype=np.float32) for key, value in data.items()
+        }
+
+    def _save(self) -> None:
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {str(key): vector.tolist() for key, vector in self._vectors.items()}
+        self.index_path.write_text(json.dumps(data))
+
+    def upsert(self, vector_key: int, embedding: Iterable[float]) -> np.ndarray:
+        vector = np.asarray(list(embedding), dtype=np.float32)
+        norm = float(np.linalg.norm(vector))
+        if norm:
+            vector = vector / norm
+        self._vectors[int(vector_key)] = vector
+        self._save()
+        return vector
+
+    def delete(self, vector_keys: Iterable[int]) -> None:
+        for key in vector_keys:
+            self._vectors.pop(int(key), None)
+        self._save()
+
+    def items(self) -> Iterable[tuple[int, np.ndarray]]:
+        self._load()
+        return self._vectors.items()
+
+    def vector_for(self, vector_key: int) -> np.ndarray | None:
+        self._load()
+        return self._vectors.get(int(vector_key))
+
+
+class InProcessVectorIndex:
+    """Cosine-search fallback used when turbovec is not installed."""
+
+    def __init__(self, index_path: str | Path | None = None) -> None:
+        self._store = PersistedVectorStore(index_path)
+
+    def upsert(self, vector_key: int, embedding: Iterable[float]) -> None:
+        self._store.upsert(vector_key, embedding)
+
+    def delete(self, vector_keys: Iterable[int]) -> None:
+        self._store.delete(vector_keys)
+
+    def search(
+        self,
+        query_embedding: list[float],
+        allowlist: list[int],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        query = np.asarray(query_embedding, dtype=np.float32)
+        norm = float(np.linalg.norm(query))
+        if norm:
+            query = query / norm
+
+        scored = []
+        for vector_key in allowlist:
+            vector = self._store.vector_for(int(vector_key))
+            if vector is None:
+                continue
+            score = float(np.dot(query, vector))
+            scored.append({"vector_key": int(vector_key), "score": score})
+
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return scored[:limit]
+
+
+class TurbovecVectorIndex:
+    """Adapter for turbovec, with API-shape tolerance while the package evolves."""
+
+    def __init__(self, dim: int, index_path: str | Path | None = None) -> None:
+        try:
+            import turbovec
+        except ImportError as exc:
+            raise RuntimeError("turbovec package is not installed") from exc
+
+        self._store = PersistedVectorStore(index_path)
+        self._index = turbovec.Index(dim=dim)
+        for vector_key, vector in self._store.items():
+            self._upsert_index(vector_key, vector.tolist())
+
+    def _upsert_index(self, vector_key: int, embedding: list[float]) -> None:
+        if hasattr(self._index, "upsert"):
+            self._index.upsert(int(vector_key), embedding)
+        else:
+            self._index.add(int(vector_key), embedding)
+
+    def upsert(self, vector_key: int, embedding: Iterable[float]) -> None:
+        vector = self._store.upsert(vector_key, embedding)
+        self._upsert_index(vector_key, vector.tolist())
+
+    def delete(self, vector_keys: Iterable[int]) -> None:
+        vector_keys = [int(key) for key in vector_keys]
+        self._store.delete(vector_keys)
+        if hasattr(self._index, "delete"):
+            self._index.delete(vector_keys)
+
+    def search(
+        self,
+        query_embedding: list[float],
+        allowlist: list[int],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        raw = self._index.search(query_embedding, allowlist=allowlist, limit=limit)
+        results = []
+        for item in raw:
+            if isinstance(item, dict):
+                results.append(item)
+            else:
+                vector_key, score = item
+                results.append({"vector_key": int(vector_key), "score": float(score)})
+        return results
+
+
+_VECTOR_INDEX: VectorIndex | None = None
+
+
+def get_vector_index() -> VectorIndex:
+    global _VECTOR_INDEX
+    if _VECTOR_INDEX is not None:
+        return _VECTOR_INDEX
+    try:
+        _VECTOR_INDEX = TurbovecVectorIndex(settings.index_dim, settings.vector_index_path)
+    except RuntimeError:
+        _VECTOR_INDEX = InProcessVectorIndex(settings.vector_index_path)
+    return _VECTOR_INDEX
+
+
+def build_embedder() -> Embedder:
+    if settings.embedding_provider.lower() == "qwen":
+        return QwenEmbeddingProvider(
+            model_name=settings.embedding_model,
+            embedding_dim=settings.embedding_dim,
+            index_dim=settings.index_dim,
+        )
+    return HashEmbeddingProvider(settings.index_dim)
+
+
+def build_summarizer() -> Summarizer:
+    if settings.overview_mode.lower() in {"llm", "openai", "openai-compatible"}:
+        return OpenAICompatibleSummarizer(
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+        )
+    return ExtractiveSummarizer()
+
+
+class SearchPipeline:
+    def __init__(
+        self,
+        *,
+        metadata_store: MetadataStore,
+        vector_index: VectorIndex,
+        embedder: Embedder,
+        summarizer: Summarizer,
+    ) -> None:
+        self.metadata_store = metadata_store
+        self.vector_index = vector_index
+        self.embedder = embedder
+        self.summarizer = summarizer
+
+    def search(
+        self,
+        query: str,
+        *,
+        candidate_limit: int | None = None,
+        result_limit: int = 8,
+    ) -> dict[str, Any]:
+        candidate_keys = self.metadata_store.candidate_vector_keys(query, candidate_limit)
+        query_embedding = self.embedder.embed_query(query)
+        vector_hits = self.vector_index.search(query_embedding, candidate_keys, result_limit)
+        ordered_keys = [int(hit["vector_key"]) for hit in vector_hits]
+        rows = self.metadata_store.chunks_by_vector_keys(ordered_keys)
+
+        scores_by_key = {int(hit["vector_key"]): hit.get("score") for hit in vector_hits}
+        for row in rows:
+            row["score"] = scores_by_key.get(int(row["vector_key"]), 0.0)
+
+        return {
+            "query": query,
+            "overview": self.summarizer.summarize(query, rows),
+            "results": rows,
+        }
+
+
+def build_pipeline() -> SearchPipeline:
+    return SearchPipeline(
+        metadata_store=PostgresMetadataStore(),
+        vector_index=get_vector_index(),
+        embedder=build_embedder(),
+        summarizer=build_summarizer(),
+    )
 
 
 def search(query: str, limit: int = 8) -> dict[str, Any]:
-    embedder = HashEmbeddingProvider(settings.embedding_dim)
-    query_vector = vector_literal(embedder.embed(query))
-
-    with connect() as conn:
-        rows = conn.execute(
-            """
-            WITH q AS (
-              SELECT plainto_tsquery('english', %s) AS tsq, %s::vector AS embedding
-            )
-            SELECT
-              c.id AS chunk_id,
-              d.id AS document_id,
-              d.title,
-              d.author,
-              d.source_url,
-              c.chunk_index,
-              c.body,
-              ts_rank(c.search_vector, q.tsq) AS lexical_score,
-              1 - (c.embedding <=> q.embedding) AS vector_score,
-              (
-                0.55 * ts_rank(c.search_vector, q.tsq) +
-                0.45 * (1 - (c.embedding <=> q.embedding))
-              ) AS score
-            FROM chunks c
-            JOIN documents d ON d.id = c.document_id
-            CROSS JOIN q
-            WHERE c.search_vector @@ q.tsq
-               OR c.embedding <=> q.embedding < 0.95
-            ORDER BY score DESC
-            LIMIT %s
-            """,
-            (query, query_vector, limit),
-        ).fetchall()
-
-    return {
-        "query": query,
-        "overview": build_overview(query, rows),
-        "results": rows,
-    }
-
+    pipeline = build_pipeline()
+    return pipeline.search(query, candidate_limit=None, result_limit=limit)

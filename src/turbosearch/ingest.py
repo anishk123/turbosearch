@@ -3,7 +3,7 @@ from typing import Any
 
 import requests
 
-from turbosearch.chunking import chunk_text, strip_gutenberg_boilerplate
+from turbosearch.chunking import chunk_text
 from turbosearch.config import settings
 from turbosearch.db import connect
 from turbosearch.search import build_embedder, get_vector_index
@@ -28,8 +28,7 @@ def ingest_url(
 ) -> int:
     response = requests.get(url, timeout=30)
     response.raise_for_status()
-    text = strip_gutenberg_boilerplate(response.text)
-    chunks = chunk_text(text)
+    chunks = chunk_text(response.text)
     embedder = build_embedder()
     embedding_model, embedding_dim = embedding_metadata(embedder)
     vector_index = get_vector_index()

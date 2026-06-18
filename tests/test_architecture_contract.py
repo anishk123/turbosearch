@@ -85,10 +85,21 @@ def test_api_exposes_s3_ingest_endpoint() -> None:
 
 
 def test_examples_are_not_embedded_in_source() -> None:
-    ingest = (ROOT / "src" / "turbosearch" / "ingest.py").read_text()
+    source_text = "\n".join(path.read_text() for path in (ROOT / "src").rglob("*.py"))
 
-    assert "gutenberg.org" not in ingest
-    assert "LOCAL_EXAMPLE_DOCUMENTS" not in ingest
-    assert "DEFAULT_BOOKS" not in ingest
+    assert "gutenberg" not in source_text.lower()
+    assert "LOCAL_EXAMPLE_DOCUMENTS" not in source_text
+    assert "DEFAULT_BOOKS" not in source_text
     assert (ROOT / "examples" / "local-docs" / "search-notes.md").exists()
     assert (ROOT / "examples" / "project-gutenberg" / "urls.json").exists()
+
+
+def test_turbovec_qwen_e2e_path_is_documented() -> None:
+    makefile = (ROOT / "Makefile").read_text()
+    readme = (ROOT / "README.md").read_text()
+
+    assert "e2e-turbovec-qwen" in makefile
+    assert "EMBEDDING_PROVIDER=qwen VECTOR_BACKEND=turbovec" in makefile
+    assert "make e2e-turbovec-qwen" in readme
+    assert "VECTOR_BACKEND=turbovec" in readme
+    assert "EMBEDDING_PROVIDER=qwen" in readme

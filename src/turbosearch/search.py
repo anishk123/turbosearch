@@ -178,25 +178,28 @@ class TurbovecVectorIndex:
             ) from exc
 
         self._store = PersistedVectorStore(index_path)
-        self._index = turbovec.Index(dim=dim)
+        self._index = turbovec.IdMapIndex(dim=dim)
         for vector_key, vector in self._store.items():
-            self._upsert_index(vector_key, vector.tolist())
+            self._upsert_index(vector_key, vector)
+        self._index.prepare()
 
-    def _upsert_index(self, vector_key: int, embedding: list[float]) -> None:
-        if hasattr(self._index, "upsert"):
-            self._index.upsert(int(vector_key), embedding)
-        else:
-            self._index.add(int(vector_key), embedding)
+    def _upsert_index(self, vector_key: int, embedding: Iterable[float]) -> None:
+        vectors = np.asarray([list(embedding)], dtype=np.float32)
+        ids = np.asarray([int(vector_key)], dtype=np.uint64)
+        self._index.add_with_ids(vectors, ids)
+        self._index.prepare()
 
     def upsert(self, vector_key: int, embedding: Iterable[float]) -> None:
         vector = self._store.upsert(vector_key, embedding)
-        self._upsert_index(vector_key, vector.tolist())
+        self._upsert_index(vector_key, vector)
 
     def delete(self, vector_keys: Iterable[int]) -> None:
         vector_keys = [int(key) for key in vector_keys]
         self._store.delete(vector_keys)
-        if hasattr(self._index, "delete"):
-            self._index.delete(vector_keys)
+        for vector_key in vector_keys:
+            if hasattr(self._index, "contains") and self._index.contains(vector_key):
+                self._index.remove(vector_key)
+        self._index.prepare()
 
     def search(
         self,
@@ -204,14 +207,12 @@ class TurbovecVectorIndex:
         allowlist: list[int],
         limit: int,
     ) -> list[dict[str, Any]]:
-        raw = self._index.search(query_embedding, allowlist=allowlist, limit=limit)
+        query = np.asarray([query_embedding], dtype=np.float32)
+        candidates = np.asarray(allowlist, dtype=np.uint64)
+        scores, ids = self._index.search(query, limit, allowlist=candidates)
         results = []
-        for item in raw:
-            if isinstance(item, dict):
-                results.append(item)
-            else:
-                vector_key, score = item
-                results.append({"vector_key": int(vector_key), "score": float(score)})
+        for score, vector_key in zip(scores[0], ids[0], strict=False):
+            results.append({"vector_key": int(vector_key), "score": float(score)})
         return results
 
 

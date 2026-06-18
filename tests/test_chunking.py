@@ -1,21 +1,18 @@
-from turbosearch.chunking import chunk_text, strip_gutenberg_boilerplate
+from turbosearch.chunking import chunk_text
 
 
-def test_strip_gutenberg_boilerplate() -> None:
-    text = """
-Header
-*** START OF THE PROJECT GUTENBERG EBOOK TEST ***
-Real text
-*** END OF THE PROJECT GUTENBERG EBOOK TEST ***
-Footer
-"""
-    assert strip_gutenberg_boilerplate(text) == "Real text"
+def test_chunk_text_splits_long_text_with_overlap() -> None:
+    text = " ".join(f"word{i}" for i in range(80))
+
+    chunks = chunk_text(text, max_words=35, overlap_words=10)
+
+    assert len(chunks) == 3
+    assert chunks[0].startswith("word0 word1")
+    assert chunks[1].startswith("word25 word26")
+    assert "word25" in chunks[0]
+    assert "word25" in chunks[1]
+    assert chunks[-1].endswith("word78 word79")
 
 
-def test_chunk_text_overlaps() -> None:
-    text = " ".join(f"word{i}" for i in range(100))
-    chunks = chunk_text(text, max_words=30, overlap_words=10)
-    assert len(chunks) > 1
-    assert "word20" in chunks[0]
-    assert "word20" in chunks[1]
-
+def test_chunk_text_returns_empty_list_for_blank_text() -> None:
+    assert chunk_text("   ") == []

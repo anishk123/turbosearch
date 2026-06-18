@@ -106,7 +106,18 @@ make e2e-local
 
 The smoke path initializes Postgres, ingests `examples/local-docs`, builds/upserts local vector entries, runs search queries, and asks the configured LLM endpoint for summaries.
 
-`make e2e-local` uses the deterministic local embedder so the full Docker smoke test stays quick and reproducible. It still calls your host-installed Ollama for the LLM overview. Set `EMBEDDING_PROVIDER=qwen` when you want the higher-quality Qwen embedding path.
+`make e2e-local` uses the deterministic local embedder and `VECTOR_BACKEND=simple` so the quick smoke test stays reproducible. It still calls your host-installed Ollama for the LLM overview.
+
+Run the production-shaped local path with Qwen embeddings and turbovec indexing when you want to verify the real vector backend:
+
+```bash
+EMBEDDING_PROVIDER=qwen VECTOR_BACKEND=turbovec docker compose up --build
+make e2e-turbovec-qwen
+```
+
+If `docker` is not on your shell `PATH`, pass it explicitly, for example `make DOCKER=/opt/homebrew/bin/docker e2e-turbovec-qwen`.
+
+That path installs `turbosearch[embeddings,vector]`, uses `Qwen/Qwen3-Embedding-0.6B` to generate embeddings, stores/searches vectors through `turbovec`, and verifies the indexed chunk metadata.
 
 ## Example Data
 
